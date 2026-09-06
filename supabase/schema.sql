@@ -131,3 +131,28 @@ create index if not exists idx_shifts_shift_date on shifts(shift_date);
 
 -- Eliminare restricție fixă pe tipul de tură pentru a permite orice denumire de tură personalizată:
 alter table shifts drop constraint if exists shifts_shift_type_check;
+
+-- 11. Tabel evidență ore suplimentare (overtime_records)
+create table if not exists overtime_records (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade not null,
+  employee_id uuid references employees(id) on delete cascade not null,
+  date date not null default current_date,
+  hours_count numeric(5,2) not null check (hours_count > 0),
+  start_time time,
+  end_time time,
+  reason text,
+  status text default 'inregistrat', -- 'inregistrat', 'platit', 'compensat'
+  notes text,
+  created_at timestamp with time zone default now()
+);
+
+create index if not exists idx_overtime_records_user_id on overtime_records(user_id);
+create index if not exists idx_overtime_records_emp_id on overtime_records(employee_id);
+create index if not exists idx_overtime_records_date on overtime_records(date);
+alter table overtime_records enable row level security;
+
+drop policy if exists "Utilizatorii pot gestiona propriile ore suplimentare" on overtime_records;
+create policy "Utilizatorii pot gestiona propriile ore suplimentare"
+  on overtime_records for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+

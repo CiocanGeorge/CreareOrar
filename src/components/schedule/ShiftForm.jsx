@@ -648,13 +648,16 @@ export default function ShiftForm({
           )}
 
           {isOvertimeProjected && (
-            <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 flex items-start gap-2 text-xs text-rose-800 animate-fadeIn">
+            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2.5 text-xs text-rose-800 animate-fadeIn">
               <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
               <div>
-                <span className="font-bold">Avertisment Depășire Normă!</span>
+                <span className="font-bold">Avertisment Depășire Normă 40h/săptămână!</span>
                 <p className="mt-0.5 text-rose-700">
-                  Totalul în săptămâna <b>{weekDays[0].formattedDate} - {weekDays[6].formattedDate}</b> va ajunge la <b>{projectedWeeklyHours}h</b> (normă efectivă: <b>{projectedEffectiveHours}h</b>, depășind limita standard de 40 de ore).
+                  Totalul în săptămâna <b>{weekDays[0].formattedDate} - {weekDays[6].formattedDate}</b> va ajunge la <b>{projectedWeeklyHours}h</b> (normă efectivă: <b>{projectedEffectiveHours}h</b>).
                 </p>
+                <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100/90 text-emerald-900 font-bold text-[11px] border border-emerald-300">
+                  <span>⭐ Surplusul de <b>+{Math.round((projectedEffectiveHours - 40) * 10) / 10}h</b> va fi înregistrat automat ca <b>Ore Suplimentare</b>!</span>
+                </div>
               </div>
             </div>
           )}
@@ -687,6 +690,11 @@ export default function ShiftForm({
                     <b> {recoverableSurplus} {recoverableSurplus === 1 ? 'oră va fi alocată' : 'ore vor fi alocate'}</b> automat pentru recuperarea orelor lipsă ale angajatului (are {totalMissingToRecover}h restante).</>
                   )}
                 </p>
+                {surplusHours > totalMissingToRecover && !applyWholeWeek && (
+                  <p className="mt-1 font-semibold text-emerald-900">
+                    ⭐ Restul de <b>+{Math.round((surplusHours - totalMissingToRecover) * 10) / 10}h</b> este inclus automat în <b>Ore Suplimentare</b>!
+                  </p>
+                )}
               </div>
             </div>
             <label className="flex items-center gap-2 pt-1.5 border-t border-emerald-200 cursor-pointer font-medium text-emerald-900">
@@ -698,6 +706,23 @@ export default function ShiftForm({
               />
               <span>Stinge automat din orele lipsă cu surplusul realizat</span>
             </label>
+          </div>
+        )}
+
+        {/* Înregistrare Automată în Ore Suplimentare dacă tura > 8 ore și NU are nimic de recuperat */}
+        {surplusHours > 0 && totalMissingToRecover === 0 && (
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 flex items-start gap-2.5 text-xs text-emerald-950 animate-fadeIn">
+            <Sparkles className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold text-emerald-900">Ore Suplimentare Directe (&gt;8h/zi)</span>
+              <p className="mt-0.5 text-emerald-800">
+                {applyWholeWeek ? (
+                  <>Fiecare tură are <b>{shiftHours} ore</b> (+{surplusHours}h surplus peste 8h). Deoarece angajatul nu are ore lipsă de recuperat, surplusul de <b>+{surplusHours * selectedWeekDays.length}h</b> este inclus automat în <b>Ore Suplimentare</b>!</>
+                ) : (
+                  <>Această tură are <b>{shiftHours} ore</b> (+{surplusHours}h peste norma de 8h/zi). Deoarece angajatul nu are ore lipsă de recuperat, surplusul de <b>+{surplusHours}h</b> este inclus automat în <b>Ore Suplimentare</b>!</>
+                )}
+              </p>
+            </div>
           </div>
         )}
 

@@ -11,13 +11,15 @@ import {
   compensateMissingHoursFromShift,
   fetchShiftTemplates,
   createShiftTemplate,
-  deleteShiftTemplate
+  deleteShiftTemplate,
+  syncWeeklyOvertimeRecords
 } from '../lib/databaseService';
 import ScheduleCalendar from '../components/schedule/ScheduleCalendar';
 import MonthlyScheduleGrid from '../components/schedule/MonthlyScheduleGrid';
 import MonthlyCalendarView from '../components/schedule/MonthlyCalendarView';
 import ShiftForm from '../components/schedule/ShiftForm';
 import ShiftTemplatesModal from '../components/schedule/ShiftTemplatesModal';
+import ExportScheduleModal from '../components/schedule/ExportScheduleModal';
 import { MONTH_NAMES_RO, getWeekDaysForDate } from '../utils/monthCalculations';
 import { calculateShiftHours } from '../utils/timeCalculations';
 import { 
@@ -32,7 +34,8 @@ import {
   Filter,
   Plus,
   Clock,
-  Sparkles
+  Sparkles,
+  Download
 } from 'lucide-react';
 
 export default function SchedulePage() {
@@ -50,6 +53,7 @@ export default function SchedulePage() {
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedWeekDate, setSelectedWeekDate] = useState(() => new Date());
 
   // Filtru angajați comun
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState('all');
@@ -57,11 +61,14 @@ export default function SchedulePage() {
   // Formular modal
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [isTemplatesModalOpen, setIsTemplatesModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [shiftToEdit, setShiftToEdit] = useState(null);
   const [cellPrefill, setCellPrefill] = useState({ employeeId: null, day: null, date: null });
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const [empsData, shiftsData, missingData, templatesData] = await Promise.all([
         fetchEmployees(user?.id),
@@ -73,15 +80,22 @@ export default function SchedulePage() {
       setShifts(shiftsData);
       setMissingHours(missingData);
       setTemplates(templatesData || []);
+
+      // Sincronizare automată ore suplimentare pentru depășirile de 40h/săpt. fără ore de recuperat
+      if (shiftsData && shiftsData.length > 0) {
+        syncWeeklyOvertimeRecords(user?.id, shiftsData, missingData, empsData).catch(console.warn);
+      }
     } catch (err) {
       console.error('Eroare la încărcarea orarului:', err);
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadData(true);
   }, [user]);
 
   // Gestionare Șabloane de Ture
@@ -98,29 +112,45 @@ export default function SchedulePage() {
     setTemplates(updated);
   };
 
-  // Navigare luni
-  const handlePrevMonth = () => {
-    if (selectedMonth === 0) {
-      setSelectedYear(selectedYear - 1);
-      setSelectedMonth(11);
-    } else {
-      setSelectedMonth(selectedMonth - 1);
+  // Sincronizare săptămână la navigare
+  const handleWeekChange = (newDate) => {
+    setSelectedWeekDate(newDate);
+    if (newDate instanceof Date && !isNaN(newDate)) {
+      setSelectedYear(newDate.getFullYear());
+      setSelectedMonth(newDate.getMonth());
     }
   };
 
-  const handleNextMonth = () => {
-    if (selectedMonth === 11) {
-      setSelectedYear(selectedYear + 1);
-      setSelectedMonth(0);
-    } else {
-      setSelectedMonth(selectedMonth + 1);
+  // Navigare luni
+  const handlePrevMonth = () => {
+    let newYear = selectedYear;
+    let newMonth = selectedMonth - 1;
+    if (selectedMonth === 0) {
+      newYear = selectedYear - 1;
+      newMonth = 11;
     }
+    setSelectedYear(newYear);
+    setSelectedMonth(newMonth);
+    setSelectedWeekDate(new Date(newYear, newMonth, 1));
+  };
+
+  const handleNextMonth = () => {
+    let newYear = selectedYear;
+    let newMonth = selectedMonth + 1;
+    if (selectedMonth === 11) {
+      newYear = selectedYear + 1;
+      newMonth = 0;
+    }
+    setSelectedYear(newYear);
+    setSelectedMonth(newMonth);
+    setSelectedWeekDate(new Date(newYear, newMonth, 1));
   };
 
   const handleCurrentMonth = () => {
     const today = new Date();
     setSelectedYear(today.getFullYear());
     setSelectedMonth(today.getMonth());
+    setSelectedWeekDate(today);
   };
 
   const handleSaveShift = async (shiftData) => {
@@ -163,17 +193,32 @@ export default function SchedulePage() {
         await createShift({ ...basePayload, user_id: user?.id });
       }
     }
-    loadData();
+    // Reîncărcare silențioasă în fundal, fără a demonta calendarul sau a reseta săptămâna
+    await loadData(false);
+    // Sincronizare automată ore suplimentare (depășiri >40h fără recuperare)
+    const freshShifts = await fetchShifts(user?.id);
+    await syncWeeklyOvertimeRecords(user?.id, freshShifts, missingHours, employees);
   };
 
   const handleDeleteShift = async (shiftId) => {
     await deleteShift(shiftId);
-    loadData();
+    await loadData(false);
+    const freshShifts = await fetchShifts(user?.id);
+    await syncWeeklyOvertimeRecords(user?.id, freshShifts, missingHours, employees);
   };
 
   const handleOpenAddGeneral = () => {
     setShiftToEdit(null);
-    setCellPrefill({ employeeId: null, day: null, date: null });
+    let defaultDate = null;
+    if (viewMode === 'weekly') {
+      const weekDays = getWeekDaysForDate(selectedWeekDate);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const hasToday = weekDays.some((d) => d.dateString === todayStr);
+      defaultDate = hasToday ? todayStr : weekDays[0].dateString;
+    } else {
+      defaultDate = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`;
+    }
+    setCellPrefill({ employeeId: null, day: null, date: defaultDate });
     setIsShiftModalOpen(true);
   };
 
@@ -190,9 +235,9 @@ export default function SchedulePage() {
   const handleOpenAddForCell = (empId, dayId, dateString) => {
     let dateStr = dateString;
     if (!dateStr) {
-      const weekDays = getWeekDaysForDate(new Date());
+      const weekDays = getWeekDaysForDate(selectedWeekDate);
       const matchedDay = weekDays.find((d) => d.dayOfWeek === dayId);
-      dateStr = matchedDay ? matchedDay.dateString : new Date().toISOString().split('T')[0];
+      dateStr = matchedDay ? matchedDay.dateString : new Date(selectedWeekDate).toISOString().split('T')[0];
     }
 
     setShiftToEdit(null);
@@ -227,6 +272,17 @@ export default function SchedulePage() {
 
         {/* Month Selector & View Mode Switcher */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* Buton Export Orar (Săptămână / Lună) */}
+          <button
+            type="button"
+            onClick={() => setIsExportModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 hover:text-emerald-900 rounded-2xl transition-all border border-emerald-200 shadow-2xs hover:scale-105"
+            title="Exportă orarul pe săptămână sau pe lună în format Excel/CSV sau PDF"
+          >
+            <Download className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Exportă Orar</span>
+          </button>
+
           {/* Buton Gestionare Ture Personalizate */}
           <button
             type="button"
@@ -412,6 +468,8 @@ export default function SchedulePage() {
               shifts={shifts}
               missingHours={missingHours}
               templates={templates}
+              selectedWeekDate={selectedWeekDate}
+              onWeekChange={handleWeekChange}
               onAddShift={handleOpenAddGeneral}
               onEditShift={handleOpenEdit}
               onAddShiftForCell={handleOpenAddForCell}
@@ -448,6 +506,18 @@ export default function SchedulePage() {
         templates={templates}
         onAddTemplate={handleAddTemplate}
         onDeleteTemplate={handleDeleteTemplate}
+      />
+
+      {/* Modal Export Orar pe Săptămână sau Lună */}
+      <ExportScheduleModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        employees={employees}
+        shifts={shifts}
+        templates={templates}
+        missingHours={missingHours}
+        initialYear={selectedYear}
+        initialMonth={selectedMonth}
       />
     </div>
   );

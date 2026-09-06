@@ -8,7 +8,8 @@ import {
   LogOut, 
   Menu, 
   X, 
-  UserX
+  UserX,
+  Clock
 } from 'lucide-react';
 
 export default function Navbar() {
@@ -26,6 +27,7 @@ export default function Navbar() {
     { to: '/angajati', label: 'Angajați', icon: Users },
     { to: '/orar', label: 'Orar & Calendar', icon: CalendarDays },
     { to: '/ore-lipsa', label: 'Ore Lipsă & Recuperări', icon: UserX },
+    { to: '/ore-suplimentare', label: 'Ore Suplimentare', icon: Clock },
   ];
 
   return (

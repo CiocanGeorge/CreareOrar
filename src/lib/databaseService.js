@@ -1,5 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { BASE_DEFAULT_TEMPLATES } from '../utils/shiftTemplateHelpers';
+import { getEmployeeOvertimeStatus } from '../utils/timeCalculations';
+import { getWeekDaysForDate } from '../utils/monthCalculations';
 
 // Date demonstrative inițiale
 const INITIAL_DEMO_EMPLOYEES = [
@@ -712,3 +714,275 @@ export async function deleteShiftTemplate(id) {
   setLocalData('DEMO_SHIFT_TEMPLATES', updated);
   return true;
 }
+
+/* ==========================================================================
+   SERVICII ORE SUPLIMENTARE (OVERTIME RECORDS)
+   ========================================================================== */
+
+const INITIAL_DEMO_OVERTIME_RECORDS = [
+  {
+    id: 'ot-1',
+    user_id: 'demo-user-id',
+    employee_id: 'emp-1', // Andrei Popescu
+    date: '2026-09-03',
+    hours_count: 2.5,
+    start_time: '16:30:00',
+    end_time: '19:00:00',
+    reason: 'Inventar de stoc și organizare depozit',
+    status: 'inregistrat', // 'inregistrat', 'platit', 'compensat'
+    notes: 'A asistat echipa la finalizarea inventarului.',
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 3).toISOString(),
+  },
+  {
+    id: 'ot-2',
+    user_id: 'demo-user-id',
+    employee_id: 'emp-2', // Elena Ionescu
+    date: '2026-09-04',
+    hours_count: 3,
+    start_time: '14:00:00',
+    end_time: '17:00:00',
+    reason: 'Prelungire program urgență client',
+    status: 'platit',
+    notes: 'Achitat pe fluturașul lunii curente.',
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(),
+  },
+  {
+    id: 'ot-3',
+    user_id: 'demo-user-id',
+    employee_id: 'emp-3', // Mihai Radu
+    date: '2026-09-05',
+    hours_count: 4,
+    start_time: '08:00:00',
+    end_time: '12:00:00',
+    reason: 'Înlocuire tură coleg indisponibil',
+    status: 'compensat',
+    notes: 'Compensat cu zi liberă recuperată.',
+    created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 1).toISOString(),
+  },
+];
+
+export async function fetchOvertimeRecords(userId) {
+  if (!isUsingDemo(userId) && isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('overtime_records')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (error) {
+        return getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+      }
+      return data || [];
+    } catch (err) {
+      return getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+    }
+  } else {
+    return getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+  }
+}
+
+export async function createOvertimeRecord(recordData) {
+  const hoursCount = Math.round((parseFloat(recordData.hours_count) || 0) * 100) / 100;
+  const payload = {
+    ...recordData,
+    hours_count: hoursCount,
+    status: recordData.status || 'inregistrat',
+  };
+
+  if (!isUsingDemo(recordData?.user_id) && isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('overtime_records')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data;
+      }
+    } catch (e) {
+      console.warn('Fallback local salvare ore suplimentare:', e);
+    }
+  }
+
+  const items = getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+  const newItem = {
+    ...payload,
+    id: 'ot-' + Math.random().toString(36).substring(2, 9),
+    created_at: new Date().toISOString(),
+  };
+  const updated = [newItem, ...items];
+  setLocalData('DEMO_OVERTIME_RECORDS', updated);
+  return newItem;
+}
+
+export async function updateOvertimeRecord(id, recordData) {
+  const hoursCount = recordData.hours_count !== undefined
+    ? Math.round((parseFloat(recordData.hours_count) || 0) * 100) / 100
+    : undefined;
+
+  const payload = { ...recordData };
+  if (hoursCount !== undefined) {
+    payload.hours_count = hoursCount;
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('overtime_records')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (!error && data) {
+        return data;
+      }
+    } catch (e) {
+      console.warn('Fallback local actualizare ore suplimentare:', e);
+    }
+  }
+
+  const items = getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+  const updated = items.map((i) => (i.id === id ? { ...i, ...payload } : i));
+  setLocalData('DEMO_OVERTIME_RECORDS', updated);
+  return updated.find((i) => i.id === id);
+}
+
+export async function deleteOvertimeRecord(id) {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { error } = await supabase
+        .from('overtime_records')
+        .delete()
+        .eq('id', id);
+
+      if (!error) return true;
+    } catch (e) {
+      console.warn('Fallback local ștergere ore suplimentare:', e);
+    }
+  }
+
+  const items = getLocalData('DEMO_OVERTIME_RECORDS', INITIAL_DEMO_OVERTIME_RECORDS);
+  const updated = items.filter((i) => i.id !== id);
+  setLocalData('DEMO_OVERTIME_RECORDS', updated);
+  return true;
+}
+
+/**
+ * Sincronizează automat orele suplimentare generate din depășirea normei de 40h/săptămână
+ * pentru toți angajații, excluzând orele de recuperat (recuperarea orelor lipsă).
+ * 
+ * Regula cerută: "tot ce depășește 40h pe săptămână și nu am nimic de recuperat să se pună ore suplimentare".
+ */
+export async function syncWeeklyOvertimeRecords(userId, shifts = [], missingHours = [], employees = []) {
+  if (!shifts || shifts.length === 0) {
+    return await fetchOvertimeRecords(userId);
+  }
+
+  // 1. Identificăm toate săptămânile distincte reprezentate de turele existente (după data de Luni)
+  const weeksMap = new Map();
+  for (const shift of shifts) {
+    if (!shift.shift_date) continue;
+    try {
+      const weekDays = getWeekDaysForDate(shift.shift_date);
+      const mondayStr = weekDays[0].dateString;
+      if (!weeksMap.has(mondayStr)) {
+        weeksMap.set(mondayStr, {
+          mondayStr,
+          sundayStr: weekDays[6].dateString,
+          weekDatesList: weekDays.map((d) => d.dateString),
+          formattedRange: `${weekDays[0].formattedDate} - ${weekDays[6].formattedDate}`,
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const existingRecords = await fetchOvertimeRecords(userId);
+  const activeEmployees = employees && employees.length > 0 ? employees : await fetchEmployees(userId);
+
+  // 2. Pentru fiecare săptămână și fiecare angajat, verificăm depășirea normei de 40h
+  for (const [mondayStr, weekInfo] of weeksMap.entries()) {
+    for (const emp of activeEmployees) {
+      const empWeekShifts = shifts.filter(
+        (s) => s.employee_id === emp.id && weekInfo.weekDatesList.includes(s.shift_date)
+      );
+
+      // Calculăm statusul conform regulii: depășire 40h excluzând orele de recuperat
+      const status = getEmployeeOvertimeStatus(emp.id, empWeekShifts, missingHours);
+      const excessHours = status.extraHours; // orele peste 40h FĂRĂ ore de recuperat
+
+      const autoTag = `[AUTO_WEEK_EXCESS:${emp.id}:${mondayStr}]`;
+      const existingRec = existingRecords.find(
+        (r) => r.employee_id === emp.id && r.notes && r.notes.includes(autoTag)
+      );
+
+      if (excessHours > 0) {
+        // Găsim data ultimei ture a angajatului din această săptămână
+        const sortedShifts = [...empWeekShifts].sort((a, b) => (b.shift_date || '').localeCompare(a.shift_date || ''));
+        const recordDate = sortedShifts[0]?.shift_date || weekInfo.sundayStr;
+
+        let reasonText = `Depășire normă (>8h/zi sau >40h/săpt.) (${weekInfo.formattedRange})`;
+        let notesDetail = `total ${status.totalHours}h în săptămână (+${excessHours}h suplimentare fără ore de recuperat)`;
+
+        if (status.dailyExcessTotal > 0 && status.weeklyExcessTotal <= 0) {
+          reasonText = `Depășire normă zilnică >8h/zi (${weekInfo.formattedRange})`;
+          notesDetail = `${status.dailyExcessTotal}h lucrate peste norma de 8h/zi fără ore de recuperat (total săptămână: ${status.totalHours}h)`;
+        } else if (status.weeklyExcessTotal > 0 && status.dailyExcessTotal <= 0) {
+          reasonText = `Depășire normă săptămânală >40h (${weekInfo.formattedRange})`;
+          notesDetail = `total ${status.totalHours}h lucrate în săptămână (+${excessHours}h peste 40h fără ore de recuperat)`;
+        } else if (status.dailyExcessTotal > 0 && status.weeklyExcessTotal > 0) {
+          reasonText = `Depășire normă (>8h/zi și >40h/săpt.) (${weekInfo.formattedRange})`;
+          notesDetail = `total ${status.totalHours}h în săptămână (+${excessHours}h suplimentare peste norma de 8h/zi sau 40h/săpt. fără ore de recuperat)`;
+        }
+
+        const notesText = `Generat automat din orar: ${notesDetail}. ${autoTag}`;
+
+        if (existingRec) {
+          if (parseFloat(existingRec.hours_count) !== excessHours || existingRec.date !== recordDate || existingRec.reason !== reasonText) {
+            await updateOvertimeRecord(existingRec.id, {
+              hours_count: excessHours,
+              date: recordDate,
+              reason: reasonText,
+              notes: notesText,
+            });
+          }
+        } else {
+          await createOvertimeRecord({
+            user_id: userId,
+            employee_id: emp.id,
+            date: recordDate,
+            hours_count: excessHours,
+            reason: reasonText,
+            status: 'inregistrat',
+            notes: notesText,
+          });
+        }
+      } else {
+        // Dacă nu mai are depășire în această săptămână și există înregistrare automată în status 'inregistrat'
+        if (existingRec && existingRec.status === 'inregistrat') {
+          await deleteOvertimeRecord(existingRec.id);
+        }
+      }
+    }
+  }
+
+  // 3. Curățăm înregistrările automate orfane (pentru săptămâni care nu mai au deloc ture)
+  const currentWeekMondays = new Set(weeksMap.keys());
+  for (const rec of existingRecords) {
+    if (rec.notes && rec.notes.includes('[AUTO_WEEK_EXCESS:') && rec.status === 'inregistrat') {
+      const match = rec.notes.match(/\[AUTO_WEEK_EXCESS:([^:]+):([^\]]+)\]/);
+      if (match) {
+        const monday = match[2];
+        if (!currentWeekMondays.has(monday)) {
+          await deleteOvertimeRecord(rec.id);
+        }
+      }
+    }
+  }
+
+  return await fetchOvertimeRecords(userId);
+}
+

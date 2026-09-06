@@ -95,6 +95,8 @@ export function getEmployeeOvertimeStatus(employeeId, shifts = [], missingHours 
       effectiveHours: 0,
       recoveryDeducted: 0,
       extraHours: 0,
+      dailyExcessTotal: 0,
+      weeklyExcessTotal: 0,
       isOvertime: false,
       hasRecoveryHours: false,
       hoursRecovered: 0,
@@ -107,6 +109,20 @@ export function getEmployeeOvertimeStatus(employeeId, shifts = [], missingHours 
     empShifts.reduce((acc, s) => acc + calculateShiftHours(s.start_time, s.end_time), 0) * 100
   ) / 100;
 
+  // 1. Surplus zilnic: tot ce depășește norma standard de 8h pe fiecare tură în parte
+  const dailyExcessTotal = Math.round(
+    empShifts.reduce((acc, s) => {
+      const h = calculateShiftHours(s.start_time, s.end_time);
+      return acc + Math.max(0, h - 8);
+    }, 0) * 100
+  ) / 100;
+
+  // 2. Surplus săptămânal: tot ce depășește norma de 40h/săptămână
+  const weeklyExcessTotal = Math.round(Math.max(0, totalHours - MAX_STANDARD_WEEKLY_HOURS) * 100) / 100;
+
+  // Total brut depășire: fie din ture > 8h/zi, fie din depășirea normei de 40h/săpt.
+  const rawExcess = Math.max(dailyExcessTotal, weeklyExcessTotal);
+
   // Ore lipsă restante încă de recuperat pentru acest angajat
   const empMissing = (missingHours || []).filter((m) => m.employee_id === employeeId);
   const hoursPendingToRecover = empMissing
@@ -116,29 +132,26 @@ export function getEmployeeOvertimeStatus(employeeId, shifts = [], missingHours 
       return acc + Math.max(0, diff);
     }, 0);
 
-  // Câte ore brute peste limita de 40h are programat în această săptămână
-  const rawExcess = Math.max(0, totalHours - MAX_STANDARD_WEEKLY_HOURS);
-
-  // Deducem DOAR orele de recuperat active (ore lipsă care trebuie recuperate)
-  // Dacă angajatul nu are ore de recuperat (hoursPendingToRecover === 0), atunci este fără ore de recuperat:
-  // orice oră peste 40 este depășire directă (overtime)!
+  // Deducem DOAR orele de recuperat active (recuperarea orelor lipsă)
+  // Dacă angajatul nu are ore de recuperat (hoursPendingToRecover === 0), atunci
+  // tot ce depășește 8h/zi sau 40h/săpt. este ORE SUPLIMENTARE!
   let recoveryDeducted = 0;
   if (rawExcess > 0 && hoursPendingToRecover > 0) {
     recoveryDeducted = Math.min(rawExcess, hoursPendingToRecover);
   }
 
-  // Orele efective calculate fără orele de recuperat
+  // Orele suplimentare rămase după deducerea recuperării
+  const extraHours = Math.round(Math.max(0, rawExcess - recoveryDeducted) * 10) / 10;
   const effectiveHours = Math.round(Math.max(0, totalHours - recoveryDeducted) * 10) / 10;
-  const isOvertime = effectiveHours > MAX_STANDARD_WEEKLY_HOURS;
-  const extraHours = isOvertime
-    ? Math.round((effectiveHours - MAX_STANDARD_WEEKLY_HOURS) * 10) / 10
-    : 0;
+  const isOvertime = extraHours > 0;
 
   return {
     totalHours,
     effectiveHours,
     recoveryDeducted: Math.round(recoveryDeducted * 10) / 10,
     extraHours,
+    dailyExcessTotal: Math.round(dailyExcessTotal * 10) / 10,
+    weeklyExcessTotal: Math.round(weeklyExcessTotal * 10) / 10,
     isOvertime,
     hasRecoveryHours: hoursPendingToRecover > 0,
     hoursPendingToRecover: Math.round(hoursPendingToRecover * 10) / 10,

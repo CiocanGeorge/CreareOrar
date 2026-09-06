@@ -69,7 +69,7 @@ export function getCalendarMatrix(year, month) {
     for (let i = padBeforeCount - 1; i >= 0; i--) {
       const d = prevMonthLastDate - i;
       const prevDate = new Date(year, month - 1, d);
-      const prevDateStr = prevDate.toISOString().split('T')[0];
+      const prevDateStr = toDateString(prevDate.getFullYear(), prevDate.getMonth(), prevDate.getDate());
       const dow = getDayOfWeekFromDate(prevDateStr);
       calendarDays.push({
         dayNumber: d,
@@ -91,7 +91,7 @@ export function getCalendarMatrix(year, month) {
   const padAfterCount = (7 - (calendarDays.length % 7)) % 7;
   for (let i = 1; i <= padAfterCount; i++) {
     const nextDate = new Date(year, month + 1, i);
-    const nextDateStr = nextDate.toISOString().split('T')[0];
+    const nextDateStr = toDateString(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate());
     const dow = getDayOfWeekFromDate(nextDateStr);
     calendarDays.push({
       dayNumber: i,

@@ -11,7 +11,9 @@ import {
   updateShift, 
   deleteShift,
   compensateMissingHoursFromShift,
-  fetchShiftTemplates
+  fetchShiftTemplates,
+  fetchOvertimeRecords,
+  syncWeeklyOvertimeRecords
 } from '../lib/databaseService';
 import { DAYS_OF_WEEK, SHIFT_TYPES } from '../utils/dateConstants';
 import { 
@@ -36,10 +38,13 @@ import {
   CheckCircle2,
   CalendarCheck,
   RotateCcw,
-  UserX
+  UserX,
+  Download,
+  Timer
 } from 'lucide-react';
 import EmployeeForm from '../components/employees/EmployeeForm';
 import ShiftForm from '../components/schedule/ShiftForm';
+import ExportScheduleModal from '../components/schedule/ExportScheduleModal';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -47,11 +52,13 @@ export default function DashboardPage() {
   const [shifts, setShifts] = useState([]);
   const [missingHours, setMissingHours] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [overtimeRecords, setOvertimeRecords] = useState([]);
   const [loading, setLoading] = useState(true);
 
   // Modale
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [selectedShiftToEdit, setSelectedShiftToEdit] = useState(null);
   const [selectedWeekFilter, setSelectedWeekFilter] = useState('all');
 
@@ -61,16 +68,23 @@ export default function DashboardPage() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [empData, shiftsData, missingData, templatesData] = await Promise.all([
+      const [empData, shiftsData, missingData, templatesData, overtimeData] = await Promise.all([
         fetchEmployees(user.id),
         fetchShifts(user.id),
         fetchMissingHours(user.id),
         fetchShiftTemplates(user.id),
+        fetchOvertimeRecords(user.id),
       ]);
       setEmployees(empData || []);
       setShifts(shiftsData || []);
       setMissingHours(missingData || []);
       setTemplates(templatesData || []);
+
+      let finalOvertime = overtimeData || [];
+      if (shiftsData && shiftsData.length > 0) {
+        finalOvertime = await syncWeeklyOvertimeRecords(user.id, shiftsData, missingData || [], empData || []);
+      }
+      setOvertimeRecords(finalOvertime);
     } catch (err) {
       console.error('Eroare la încărcarea datelor pe dashboard:', err);
     } finally {
@@ -239,6 +253,10 @@ export default function DashboardPage() {
     loadData();
   };
 
+  const totalOvertimeHours = Math.round(
+    overtimeRecords.reduce((acc, r) => acc + (parseFloat(r.hours_count) || 0), 0) * 10
+  ) / 10;
+
   return (
     <div className="space-y-8">
       {/* Welcome Banner */}
@@ -273,6 +291,15 @@ export default function DashboardPage() {
             >
               <Users className="w-4 h-4 text-white" />
               Adaugă Angajat
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsExportModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/15 hover:bg-white/25 text-white font-medium text-xs transition-all border border-white/20"
+              title="Exportă orarul pe săptămână sau pe lună"
+            >
+              <Download className="w-4 h-4 text-emerald-300" />
+              Exportă Orar
             </button>
             <Link
               to="/orar"
@@ -396,6 +423,35 @@ export default function DashboardPage() {
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Widget Rapid: Evidență Ore Suplimentare */}
+      <div className="bg-gradient-to-r from-emerald-950 via-slate-900 to-teal-950 rounded-2xl p-5 text-white shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-emerald-500/20">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400 flex-shrink-0 shadow-inner">
+            <Timer className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md border border-emerald-400/30">
+                Evidență Ore Suplimentare
+              </span>
+              <span className="text-xs text-slate-400">•</span>
+              <span className="text-xs text-slate-300">{overtimeRecords.length} {overtimeRecords.length === 1 ? 'înregistrare' : 'înregistrări'}</span>
+            </div>
+            <h3 className="text-base font-bold text-white mt-1">
+              Total ore suplimentare salvate: <span className="text-emerald-400 font-black">+{totalOvertimeHours} ore</span>
+            </h3>
+          </div>
+        </div>
+
+        <Link
+          to="/ore-suplimentare"
+          className="px-4 py-2.5 bg-emerald-500 hover:bg-emerald-400 active:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 flex-shrink-0"
+        >
+          <span>Gestionează Ore Suplimentare</span>
+          <ArrowUpRight className="w-4 h-4" />
+        </Link>
       </div>
 
       {/* Main Content: Turele de azi + Alerte 40h */}
@@ -740,6 +796,16 @@ export default function DashboardPage() {
         shifts={shifts}
         missingHours={missingHours}
         templates={templates}
+      />
+
+      {/* Modal Export Orar */}
+      <ExportScheduleModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        employees={employees}
+        shifts={shifts}
+        templates={templates}
+        missingHours={missingHours}
       />
     </div>
   );

@@ -8,6 +8,7 @@ import DashboardPage from './pages/DashboardPage';
 import EmployeesPage from './pages/EmployeesPage';
 import SchedulePage from './pages/SchedulePage';
 import MissingHoursPage from './pages/MissingHoursPage';
+import OvertimePage from './pages/OvertimePage';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="/angajati" element={<EmployeesPage />} />
             <Route path="/orar" element={<SchedulePage />} />
             <Route path="/ore-lipsa" element={<MissingHoursPage />} />
+            <Route path="/ore-suplimentare" element={<OvertimePage />} />
           </Route>
 
           {/* Fallback */}

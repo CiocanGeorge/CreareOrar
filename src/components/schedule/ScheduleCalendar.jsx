@@ -25,12 +25,26 @@ export default function ScheduleCalendar({
   shifts = [], 
   missingHours = [],
   templates = [],
+  selectedWeekDate: controlledWeekDate,
+  onWeekChange,
   onAddShift, 
   onEditShift, 
   onAddShiftForCell 
 }) {
   const [selectedEmployeeFilter, setSelectedEmployeeFilter] = useState('all');
-  const [selectedWeekDate, setSelectedWeekDate] = useState(new Date());
+  const [internalWeekDate, setInternalWeekDate] = useState(new Date());
+
+  const selectedWeekDate = (controlledWeekDate !== undefined && controlledWeekDate !== null) 
+    ? controlledWeekDate 
+    : internalWeekDate;
+
+  const handleWeekChange = (newDate) => {
+    if (onWeekChange) {
+      onWeekChange(newDate);
+    } else {
+      setInternalWeekDate(newDate);
+    }
+  };
 
   const todayDay = getTodayDayOfWeek();
   const weekDays = getWeekDaysForDate(selectedWeekDate);
@@ -64,17 +78,17 @@ export default function ScheduleCalendar({
   const handlePrevWeek = () => {
     const d = new Date(selectedWeekDate);
     d.setDate(d.getDate() - 7);
-    setSelectedWeekDate(d);
+    handleWeekChange(d);
   };
 
   const handleNextWeek = () => {
     const d = new Date(selectedWeekDate);
     d.setDate(d.getDate() + 7);
-    setSelectedWeekDate(d);
+    handleWeekChange(d);
   };
 
   const handleCurrentWeek = () => {
-    setSelectedWeekDate(new Date());
+    handleWeekChange(new Date());
   };
 
   return (
@@ -295,8 +309,16 @@ export default function ScheduleCalendar({
                                         {formatTimeShort(shift.start_time)} - {formatTimeShort(shift.end_time)}
                                       </div>
                                       {hours > 8 && (
-                                        <div className="text-[9px] font-bold text-emerald-700 flex items-center gap-0.5 mt-0.5 bg-emerald-100/60 px-1 py-0.2 rounded w-fit">
-                                          <span>+{Math.round((hours - 8) * 10) / 10}h recuperare</span>
+                                        <div className={`text-[9px] font-bold flex items-center gap-0.5 mt-0.5 px-1 py-0.2 rounded w-fit ${
+                                          pendingRecoveryHours > 0
+                                            ? 'text-amber-800 bg-amber-100/70 border border-amber-200'
+                                            : 'text-emerald-800 bg-emerald-100/70 border border-emerald-200'
+                                        }`}>
+                                          {pendingRecoveryHours > 0 ? (
+                                            <span>+{Math.round((hours - 8) * 10) / 10}h recuperare</span>
+                                          ) : (
+                                            <span>⭐ +{Math.round((hours - 8) * 10) / 10}h suplimentare</span>
+                                          )}
                                         </div>
                                       )}
                                     </div>
@@ -351,10 +373,18 @@ export default function ScheduleCalendar({
 
                           {/* 40h warning tag doar dacă depășește FĂRĂ orele de recuperat */}
                           {hasOvertime && (
-                            <span className="text-[10px] font-bold text-rose-600 flex items-center gap-0.5 mt-0.5">
-                              <AlertTriangle className="w-3 h-3 text-rose-500" />
-                              &gt;40h (+{empStatus.extraHours}h)
-                            </span>
+                            <div className="flex flex-col items-center gap-0.5 mt-0.5">
+                              <span className="text-[10px] font-bold text-rose-600 flex items-center gap-0.5">
+                                <AlertTriangle className="w-3 h-3 text-rose-500" />
+                                &gt;40h (+{empStatus.extraHours}h)
+                              </span>
+                              <span 
+                                className="text-[9px] font-bold text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded border border-emerald-300 shadow-2xs"
+                                title="Surplusul de ore fără recuperare este salvat automat ca ore suplimentare"
+                              >
+                                +{empStatus.extraHours}h ore suplimentare
+                              </span>
+                            </div>
                           )}
 
                           {/* Tag recuperare dacă totalul brut >40h dar orele sunt de recuperat */}
