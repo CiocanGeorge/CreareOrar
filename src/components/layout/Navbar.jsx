@@ -6,20 +6,14 @@ import {
   LayoutDashboard, 
   Users, 
   LogOut, 
-  Settings, 
-  Database, 
   Menu, 
   X, 
-  Clock,
-  ShieldAlert,
   UserX
 } from 'lucide-react';
-import SetupGuideModal from '../common/SetupGuideModal';
 
 export default function Navbar() {
-  const { user, signOut, isSupabaseConfigured, isDemoMode } = useAuth();
+  const { user, signOut } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [setupModalOpen, setSetupModalOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -80,26 +74,10 @@ export default function Navbar() {
               </nav>
             </div>
 
-            {/* Right side: Supabase status & User profile & Actions */}
+            {/* Right side: User profile & Actions */}
             <div className="hidden md:flex items-center gap-3">
-              {/* Supabase connection indicator button */}
-              <button
-                type="button"
-                onClick={() => setSetupModalOpen(true)}
-                title="Configurare conexiune Supabase"
-                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                  isSupabaseConfigured
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                    : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'
-                }`}
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>{isSupabaseConfigured ? 'Supabase Activ' : 'Mod Demo (Config)'}</span>
-                <span className={`w-2 h-2 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-              </button>
-
               {/* User badge */}
-              <div className="flex items-center gap-2.5 pl-2 border-l border-slate-200">
+              <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center font-bold text-xs uppercase shadow-xs">
                   {user?.email ? user.email.substring(0, 2) : 'AN'}
                 </div>
@@ -126,13 +104,6 @@ export default function Navbar() {
 
             {/* Mobile menu button */}
             <div className="flex items-center gap-2 md:hidden">
-              <button
-                type="button"
-                onClick={() => setSetupModalOpen(true)}
-                className="p-2 text-amber-700 bg-amber-50 rounded-lg text-xs"
-              >
-                <Database className="w-4 h-4" />
-              </button>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -185,9 +156,6 @@ export default function Navbar() {
           </div>
         )}
       </header>
-
-      {/* Setup Guide Modal */}
-      <SetupGuideModal isOpen={setupModalOpen} onClose={() => setSetupModalOpen(false)} />
     </>
   );
 }
