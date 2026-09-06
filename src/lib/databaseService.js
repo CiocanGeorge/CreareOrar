@@ -91,12 +91,22 @@ function setLocalData(key, val) {
   }
 }
 
+export function isUsingDemo(userId) {
+  if (userId && typeof userId === 'string' && (userId.startsWith('demo-') || userId === 'demo-user-id')) {
+    return true;
+  }
+  if (typeof window !== 'undefined' && localStorage.getItem('CREARE_ORAR_DEMO_MODE') === 'true') {
+    return true;
+  }
+  return !isSupabaseConfigured || !supabase;
+}
+
 /* ==========================================================================
    SERVICII ANGAJAȚI (EMPLOYEES)
    ========================================================================== */
 
 export async function fetchEmployees(userId) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(userId) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('employees')
       .select('*')
@@ -112,7 +122,7 @@ export async function fetchEmployees(userId) {
 }
 
 export async function createEmployee(employeeData) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(employeeData?.user_id) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('employees')
       .insert([employeeData])
@@ -136,7 +146,7 @@ export async function createEmployee(employeeData) {
 }
 
 export async function updateEmployee(id, employeeData) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(employeeData?.user_id) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('employees')
       .update(employeeData)
@@ -156,7 +166,7 @@ export async function updateEmployee(id, employeeData) {
 }
 
 export async function deleteEmployee(id) {
-  if (isSupabaseConfigured && supabase) {
+  if (isSupabaseConfigured && supabase && !isUsingDemo()) {
     const { error } = await supabase
       .from('employees')
       .delete()
@@ -183,7 +193,7 @@ export async function deleteEmployee(id) {
    ========================================================================== */
 
 export async function fetchShifts(userId) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(userId) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('shifts')
       .select('*')
@@ -200,7 +210,7 @@ export async function fetchShifts(userId) {
 }
 
 export async function createShift(shiftData) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(shiftData?.user_id) && isSupabaseConfigured && supabase) {
     let { data, error } = await supabase
       .from('shifts')
       .insert([shiftData])
@@ -257,7 +267,8 @@ export async function createShift(shiftData) {
 
 export async function createShiftsBulk(shiftsArray) {
   if (!shiftsArray || shiftsArray.length === 0) return [];
-  if (isSupabaseConfigured && supabase) {
+  const firstUserId = shiftsArray[0]?.user_id;
+  if (!isUsingDemo(firstUserId) && isSupabaseConfigured && supabase) {
     let { data, error } = await supabase
       .from('shifts')
       .insert(shiftsArray)
@@ -384,7 +395,7 @@ export function computeMissingHourStatus(hoursMissed, hoursRecovered) {
 }
 
 export async function fetchMissingHours(userId) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(userId) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('missing_hours')
       .select('*')
@@ -409,7 +420,7 @@ export async function createMissingHour(recordData) {
     status,
   };
 
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(recordData?.user_id) && isSupabaseConfigured && supabase) {
     const { data, error } = await supabase
       .from('missing_hours')
       .insert([payload])
@@ -636,7 +647,7 @@ export async function compensateMissingHoursFromShift(userId, employeeId, surplu
    ========================================================================== */
 
 export async function fetchShiftTemplates(userId) {
-  if (isSupabaseConfigured && supabase) {
+  if (!isUsingDemo(userId) && isSupabaseConfigured && supabase) {
     try {
       const { data, error } = await supabase
         .from('shift_templates')

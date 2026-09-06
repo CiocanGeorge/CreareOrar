@@ -17,10 +17,12 @@ import { DAYS_OF_WEEK, SHIFT_TYPES } from '../utils/dateConstants';
 import { 
   calculateShiftHours, 
   calculateEmployeeWeeklyHours, 
+  getEmployeeOvertimeStatus,
   formatTimeShort, 
   isOvertime, 
   getTodayDayOfWeek 
 } from '../utils/timeCalculations';
+import { getWeekDaysForDate } from '../utils/monthCalculations';
 import { 
   Users, 
   CalendarDays, 
@@ -44,29 +46,30 @@ export default function DashboardPage() {
   const [employees, setEmployees] = useState([]);
   const [shifts, setShifts] = useState([]);
   const [missingHours, setMissingHours] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Modale rapide
+  // Modale
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [isShiftModalOpen, setIsShiftModalOpen] = useState(false);
   const [selectedShiftToEdit, setSelectedShiftToEdit] = useState(null);
-  const [templates, setTemplates] = useState([]);
+  const [selectedWeekFilter, setSelectedWeekFilter] = useState('all');
 
   const todayDayIndex = getTodayDayOfWeek();
-  const todayDayName = DAYS_OF_WEEK.find((d) => d.id === todayDayIndex)?.name || 'Astăzi';
+  const todayDayName = DAYS_OF_WEEK[todayDayIndex]?.name || 'Astăzi';
 
   const loadData = async () => {
-    setLoading(true);
     try {
-      const [empsData, shiftsData, missingData, templatesData] = await Promise.all([
-        fetchEmployees(user?.id),
-        fetchShifts(user?.id),
-        fetchMissingHours(user?.id),
-        fetchShiftTemplates(user?.id),
+      setLoading(true);
+      const [empData, shiftsData, missingData, templatesData] = await Promise.all([
+        fetchEmployees(user.id),
+        fetchShifts(user.id),
+        fetchMissingHours(user.id),
+        fetchShiftTemplates(user.id),
       ]);
-      setEmployees(empsData);
-      setShifts(shiftsData);
-      setMissingHours(missingData);
+      setEmployees(empData || []);
+      setShifts(shiftsData || []);
+      setMissingHours(missingData || []);
       setTemplates(templatesData || []);
     } catch (err) {
       console.error('Eroare la încărcarea datelor pe dashboard:', err);
@@ -79,24 +82,104 @@ export default function DashboardPage() {
     loadData();
   }, [user]);
 
-  // Calcule statistici
+  // 1. Identificăm TOATE săptămânile distincte din orar + săptămâna curentă
+  const allWeeksMap = new Map();
+  const thisWeekDays = getWeekDaysForDate(new Date());
+  const thisWeekMonday = thisWeekDays[0].dateString;
+
+  allWeeksMap.set(thisWeekMonday, {
+    key: thisWeekMonday,
+    mondayDate: thisWeekMonday,
+    sundayDate: thisWeekDays[6].dateString,
+    label: `${thisWeekDays[0].formattedDate} - ${thisWeekDays[6].formattedDate}`,
+    isCurrent: true,
+    weekDays: thisWeekDays,
+  });
+
+  shifts.forEach((s) => {
+    if (s.shift_date) {
+      const wDays = getWeekDaysForDate(s.shift_date);
+      const mDate = wDays[0].dateString;
+      if (!allWeeksMap.has(mDate)) {
+        allWeeksMap.set(mDate, {
+          key: mDate,
+          mondayDate: mDate,
+          sundayDate: wDays[6].dateString,
+          label: `${wDays[0].formattedDate} - ${wDays[6].formattedDate}`,
+          isCurrent: mDate === thisWeekMonday,
+          weekDays: wDays,
+        });
+      }
+    }
+  });
+
+  const allWeeks = Array.from(allWeeksMap.values()).sort((a, b) => a.mondayDate.localeCompare(b.mondayDate));
+
+  // 2. Verificare pentru FIECARE săptămână în parte: a depășit sau nu acele 40 de ore (fără ore de recuperat)?
+  const weeklyAnalysis = allWeeks.map((week) => {
+    const weekDatesSet = new Set(week.weekDays.map((d) => d.dateString));
+
+    const weekShifts = shifts.filter((s) => {
+      if (s.shift_date) {
+        return weekDatesSet.has(s.shift_date);
+      }
+      return week.isCurrent;
+    });
+
+    const totalWeekHours = weekShifts.reduce(
+      (acc, s) => acc + calculateShiftHours(s.start_time, s.end_time),
+      0
+    );
+
+    const employeeResults = employees.map((emp) => {
+      const status = getEmployeeOvertimeStatus(emp.id, weekShifts, missingHours);
+      return {
+        ...emp,
+        ...status,
+        weekKey: week.key,
+        weekLabel: week.label,
+        isCurrentWeek: week.isCurrent,
+      };
+    });
+
+    const overtimeInWeek = employeeResults.filter((r) => r.isOvertime);
+    const recoveringInWeek = employeeResults.filter(
+      (r) => !r.isOvertime && r.recoveryDeducted > 0 && r.totalHours > 40
+    );
+
+    return {
+      ...week,
+      shiftsCount: weekShifts.length,
+      totalHours: Math.round(totalWeekHours * 10) / 10,
+      employeeResults,
+      overtimeEmployees: overtimeInWeek,
+      recoveringEmployees: recoveringInWeek,
+      hasError: overtimeInWeek.length > 0,
+    };
+  });
+
+  // Toate erorile de depășire găsite pe TOATE săptămânile
+  const allOvertimeErrors = weeklyAnalysis.flatMap((w) => w.overtimeEmployees);
+
+  // Erori filtrate după săptămâna selectată
+  const displayedErrors = selectedWeekFilter === 'all'
+    ? allOvertimeErrors
+    : (weeklyAnalysis.find((w) => w.key === selectedWeekFilter)?.overtimeEmployees || []);
+
+  const displayedRecovering = selectedWeekFilter === 'all'
+    ? weeklyAnalysis.flatMap((w) => w.recoveringEmployees)
+    : (weeklyAnalysis.find((w) => w.key === selectedWeekFilter)?.recoveringEmployees || []);
+
+  // Calcule statistici generale
   const totalEmployees = employees.length;
   const totalShifts = shifts.length;
-  const totalHours = shifts.reduce((acc, s) => acc + calculateShiftHours(s.start_time, s.end_time), 0);
+  const totalHours = Math.round(shifts.reduce((acc, s) => acc + calculateShiftHours(s.start_time, s.end_time), 0) * 10) / 10;
 
   // Turele de astăzi
   const todayStr = new Date().toISOString().split('T')[0];
   const todayShifts = shifts.filter((s) => s.shift_date ? s.shift_date === todayStr : s.day_of_week === todayDayIndex);
 
-  // Angajați cu peste 40 de ore
-  const overtimeEmployees = employees
-    .map((emp) => {
-      const hours = calculateEmployeeWeeklyHours(emp.id, shifts);
-      return { ...emp, hours, extraHours: Math.round((hours - 40) * 10) / 10 };
-    })
-    .filter((emp) => emp.hours > 40);
-
-  // Ore de recuperat
+  // Ore de recuperat restante
   const pendingMissingRecords = missingHours.filter((m) => m.status !== 'recovered');
   const totalPendingHours = Math.round(
     pendingMissingRecords.reduce((acc, m) => {
@@ -286,28 +369,30 @@ export default function DashboardPage() {
 
         {/* Alerte >40 Ore */}
         <div className={`p-5 rounded-2xl border transition-all ${
-          overtimeEmployees.length > 0
-            ? 'bg-rose-50/70 border-rose-200 text-rose-900 shadow-xs'
+          allOvertimeErrors.length > 0
+            ? 'bg-rose-50/70 border-rose-200 text-rose-900 shadow-xs ring-1 ring-rose-300/60'
             : 'bg-white border-slate-200/80 text-slate-800 shadow-xs'
         }`}>
           <div className="flex items-center justify-between">
             <span className={`text-xs font-bold uppercase tracking-wider ${
-              overtimeEmployees.length > 0 ? 'text-rose-600' : 'text-slate-400'
+              allOvertimeErrors.length > 0 ? 'text-rose-600' : 'text-slate-400'
             }`}>
               Alerte Depășire 40h
             </span>
             <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-              overtimeEmployees.length > 0 ? 'bg-rose-100 text-rose-600' : 'bg-slate-50 text-slate-400'
+              allOvertimeErrors.length > 0 ? 'bg-rose-100 text-rose-600 animate-pulse' : 'bg-slate-50 text-slate-400'
             }`}>
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
           <div className="mt-3">
-            <div className={`text-2xl font-black ${overtimeEmployees.length > 0 ? 'text-rose-700' : 'text-slate-800'}`}>
-              {overtimeEmployees.length}
+            <div className={`text-2xl font-black ${allOvertimeErrors.length > 0 ? 'text-rose-700' : 'text-slate-800'}`}>
+              {allOvertimeErrors.length}
             </div>
-            <p className={`text-xs mt-1 ${overtimeEmployees.length > 0 ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
-              {overtimeEmployees.length > 0 ? 'Peste normă!' : 'Norme respectate'}
+            <p className={`text-xs mt-1 ${allOvertimeErrors.length > 0 ? 'text-rose-600 font-semibold' : 'text-slate-500'}`}>
+              {allOvertimeErrors.length > 0
+                ? `${allOvertimeErrors.length} ${allOvertimeErrors.length === 1 ? 'depășire detectată' : 'depășiri detectate'}`
+                : 'Toate săptămânile respectă norma'}
             </p>
           </div>
         </div>
@@ -392,40 +477,182 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Alerte de Ore (>40h) & Scurtături (1 col) */}
+        {/* Alerte de Ore (>40h) & Monitorizare pe Fiecare Săptămână (1 col) */}
         <div className="space-y-6">
-          {/* Overtime Alert Box */}
+          {/* Overtime Alert Box cu verificare pe fiecare săptămână */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
-            <div className="flex items-center gap-2 text-slate-800">
-              <AlertTriangle className={`w-5 h-5 ${overtimeEmployees.length > 0 ? 'text-rose-500' : 'text-emerald-500'}`} />
-              <h3 className="text-sm font-bold">Monitorizare Normă Săptămânală</h3>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-slate-800">
+                <AlertTriangle className={`w-5 h-5 ${allOvertimeErrors.length > 0 ? 'text-rose-500' : 'text-emerald-500'}`} />
+                <h3 className="text-sm font-bold">Monitorizare Normă Săptămânală</h3>
+              </div>
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                allOvertimeErrors.length > 0
+                  ? 'bg-rose-100 text-rose-700 border-rose-200'
+                  : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+              }`}>
+                {allOvertimeErrors.length > 0 ? `${allOvertimeErrors.length} depășiri` : 'Toate OK'}
+              </span>
             </div>
 
-            {overtimeEmployees.length === 0 ? (
+            {/* Selector săptămână pentru filtrare */}
+            {allWeeks.length > 1 && (
+              <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                <span className="text-[11px] font-semibold text-slate-500 block">Filtrează săptămâna verificată:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedWeekFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                      selectedWeekFilter === 'all'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Toate ({allWeeks.length})
+                    {allOvertimeErrors.length > 0 && (
+                      <span className="ml-1 text-[10px] text-rose-400 font-bold">• {allOvertimeErrors.length}</span>
+                    )}
+                  </button>
+                  {allWeeks.map((w) => (
+                    <button
+                      key={w.key}
+                      type="button"
+                      onClick={() => setSelectedWeekFilter(w.key)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all flex items-center gap-1 ${
+                        selectedWeekFilter === w.key
+                          ? 'bg-slate-900 text-white shadow-xs font-semibold'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      <span>{w.label}</span>
+                      {w.isCurrent && <span className="text-[9px] opacity-75">(Azi)</span>}
+                      {w.hasError ? (
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Lista depășirilor de normă */}
+            {displayedErrors.length === 0 ? (
               <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-800 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-                <span>Excelent! Niciun angajat nu depășește limita standard de 40 de ore pe săptămână.</span>
+                <span>
+                  Excelent! Niciun angajat nu depășește norma de 40 de ore (fără ore de recuperat) în {selectedWeekFilter === 'all' ? 'nicio săptămână' : 'săptămâna selectată'}.
+                </span>
               </div>
             ) : (
               <div className="space-y-2.5">
-                <p className="text-xs text-slate-500">
-                  Următorii angajați au fost programați peste norma legală de 40 de ore:
+                <p className="text-xs text-rose-700 font-semibold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
+                  Depășiri de normă detectate (&gt;40 ore fără recuperare):
                 </p>
-                {overtimeEmployees.map((emp) => (
-                  <div key={emp.id} className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
+                {displayedErrors.map((emp, idx) => (
+                  <div key={`${emp.id}-${emp.weekKey || idx}`} className="p-3 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-rose-900 block">
-                        {emp.first_name} {emp.last_name}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-bold text-rose-900">
+                          {emp.first_name} {emp.last_name}
+                        </span>
+                        {emp.weekLabel && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-rose-200/80 text-rose-900 border border-rose-300">
+                            Săpt. {emp.weekLabel}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[11px] text-rose-700 font-medium">
+                          +{emp.extraHours}h peste normă
+                        </span>
+                        {emp.recoveryDeducted > 0 && (
+                          <span className="text-[10px] text-amber-800 bg-amber-100/80 px-1.5 py-0.2 rounded font-semibold border border-amber-200">
+                            {emp.recoveryDeducted}h recuperare deduse
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-xs">
+                        {emp.effectiveHours}h efectiv
                       </span>
-                      <span className="text-[11px] text-rose-700 font-medium">
-                        +{emp.extraHours}h suplimentare
+                      <span className="block text-[10px] text-slate-500 mt-0.5">
+                        Total: {emp.totalHours}h
                       </span>
                     </div>
-                    <span className="px-2.5 py-1 rounded-full text-xs font-black bg-rose-600 text-white shadow-xs">
-                      {emp.hours}h
-                    </span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Secțiune verificare stare pentru fiecare săptămână */}
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <span className="text-[11px] font-bold text-slate-700 block">
+                Verificare stare pe fiecare săptămână:
+              </span>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {weeklyAnalysis.map((w) => (
+                  <div
+                    key={w.key}
+                    onClick={() => setSelectedWeekFilter(w.key)}
+                    className={`p-2 rounded-xl border text-xs flex items-center justify-between cursor-pointer transition-all ${
+                      w.hasError
+                        ? 'bg-rose-50/60 border-rose-200 hover:bg-rose-100/70'
+                        : 'bg-slate-50 border-slate-200/80 hover:bg-slate-100'
+                    } ${selectedWeekFilter === w.key ? 'ring-2 ring-slate-800' : ''}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-slate-800">
+                        {w.label} {w.isCurrent && <span className="text-[10px] text-emerald-600 font-bold">(Curentă)</span>}
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        {w.shiftsCount} {w.shiftsCount === 1 ? 'tură' : 'ture'} ({w.totalHours}h)
+                      </span>
+                    </div>
+                    <div>
+                      {w.hasError ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-300">
+                          <AlertTriangle className="w-2.5 h-2.5 text-rose-500" />
+                          {w.overtimeEmployees.length} {w.overtimeEmployees.length === 1 ? 'depășire' : 'depășiri'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" />
+                          Normă OK (≤40h)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Secțiune informativă pentru angajații cu ore recuperate ce nu depășesc norma efectivă */}
+            {displayedRecovering.length > 0 && (
+              <div className="pt-3 border-t border-slate-100 space-y-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Ore de recuperare recunoscute (nu generează alertă):</span>
+                </div>
+                <div className="space-y-1.5">
+                  {displayedRecovering.map((emp, idx) => (
+                    <div key={`${emp.id}-rec-${idx}`} className="p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 text-xs flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-amber-900">{emp.first_name} {emp.last_name}</span>
+                        <p className="text-[11px] text-amber-700 mt-0.5">
+                          {emp.totalHours}h programate &rarr; {emp.recoveryDeducted}h merg la recuperare ore lipsă (normă efectivă: {emp.effectiveHours}h)
+                        </p>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-white border border-amber-300 text-amber-800 font-bold text-[10px] whitespace-nowrap">
+                        Fără alertă 40h
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>

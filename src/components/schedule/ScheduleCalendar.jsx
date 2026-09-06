@@ -4,6 +4,7 @@ import {
   calculateShiftHours, 
   formatTimeShort, 
   isOvertime,
+  getEmployeeOvertimeStatus,
   getTodayDayOfWeek
 } from '../../utils/timeCalculations';
 import { getWeekDaysForDate } from '../../utils/monthCalculations';
@@ -54,10 +55,10 @@ export default function ScheduleCalendar({
     return Math.round(empWeekShifts.reduce((acc, s) => acc + calculateShiftHours(s.start_time, s.end_time), 0) * 10) / 10;
   };
 
-  // Angajați cu avertisment depășire 40h în această săptămână
+  // Angajați cu avertisment depășire 40h în această săptămână (fără ore de recuperat)
   const overtimeCount = employees.filter((e) => {
-    const hours = calculateEmployeeHoursInThisWeek(e.id);
-    return isOvertime(hours);
+    const status = getEmployeeOvertimeStatus(e.id, weekShifts, missingHours);
+    return status.isOvertime;
   }).length;
 
   const handlePrevWeek = () => {
@@ -208,8 +209,9 @@ export default function ScheduleCalendar({
               </thead>
               <tbody className="divide-y divide-slate-200 text-xs">
                 {visibleEmployees.map((emp) => {
-                  const weeklyHours = calculateEmployeeHoursInThisWeek(emp.id);
-                  const hasOvertime = isOvertime(weeklyHours);
+                  const empStatus = getEmployeeOvertimeStatus(emp.id, weekShifts, missingHours);
+                  const weeklyHours = empStatus.totalHours;
+                  const hasOvertime = empStatus.isOvertime;
 
                   // Ore de recuperat
                   const empMissing = missingHours.filter(
@@ -337,21 +339,29 @@ export default function ScheduleCalendar({
                             {weeklyHours}h
                           </span>
 
-                          {/* Progress bar up to 40h */}
+                          {/* Progress bar up to 40h bazat pe orele efective */}
                           <div className="w-24 bg-slate-200 rounded-full h-1.5 overflow-hidden mt-1">
                             <div
                               className={`h-full rounded-full ${
                                 hasOvertime ? 'bg-rose-500' : 'bg-emerald-500'
                               }`}
-                              style={{ width: `${Math.min(100, (weeklyHours / 40) * 100)}%` }}
+                              style={{ width: `${Math.min(100, (empStatus.effectiveHours / 40) * 100)}%` }}
                             />
                           </div>
 
-                          {/* 40h warning tag */}
+                          {/* 40h warning tag doar dacă depășește FĂRĂ orele de recuperat */}
                           {hasOvertime && (
                             <span className="text-[10px] font-bold text-rose-600 flex items-center gap-0.5 mt-0.5">
                               <AlertTriangle className="w-3 h-3 text-rose-500" />
-                              &gt;40h depășire
+                              &gt;40h (+{empStatus.extraHours}h)
+                            </span>
+                          )}
+
+                          {/* Tag recuperare dacă totalul brut >40h dar orele sunt de recuperat */}
+                          {!hasOvertime && empStatus.recoveryDeducted > 0 && weeklyHours > 40 && (
+                            <span className="text-[10px] font-semibold text-amber-700 flex items-center gap-0.5 mt-0.5" title="Orele peste 40 compensează ore lipsă de recuperat">
+                              <RotateCcw className="w-3 h-3 text-amber-600" />
+                              +{empStatus.recoveryDeducted}h recuperare
                             </span>
                           )}
                         </div>

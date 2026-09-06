@@ -180,7 +180,10 @@ export default function ShiftForm({
   );
   const additionalHours = applyWholeWeek ? (shiftHours * selectedWeekDays.length) : shiftHours;
   const projectedWeeklyHours = Math.round((currentWeeklyHours + additionalHours) * 100) / 100;
-  const isOvertimeProjected = projectedWeeklyHours > 40;
+  const projectedExtra = Math.max(0, projectedWeeklyHours - 40);
+  const projectedRecoveryDeducted = Math.min(projectedExtra, totalMissingToRecover);
+  const projectedEffectiveHours = Math.round((projectedWeeklyHours - projectedRecoveryDeducted) * 10) / 10;
+  const isOvertimeProjected = projectedEffectiveHours > 40;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -639,7 +642,7 @@ export default function ShiftForm({
                 Proiecție săptămâna {weekDays[0].formattedDate} - {weekDays[6].formattedDate} pentru {selectedEmployee.first_name}:
               </span>
               <span className={`font-bold ${isOvertimeProjected ? 'text-rose-600' : 'text-emerald-700'}`}>
-                {projectedWeeklyHours}h / 40h
+                {projectedWeeklyHours}h programat {projectedRecoveryDeducted > 0 ? `(${projectedEffectiveHours}h efectiv)` : '/ 40h'}
               </span>
             </div>
           )}
@@ -650,7 +653,19 @@ export default function ShiftForm({
               <div>
                 <span className="font-bold">Avertisment Depășire Normă!</span>
                 <p className="mt-0.5 text-rose-700">
-                  Totalul în săptămâna <b>{weekDays[0].formattedDate} - {weekDays[6].formattedDate}</b> va ajunge la <b>{projectedWeeklyHours}h</b>, depășind limita standard de 40 de ore.
+                  Totalul în săptămâna <b>{weekDays[0].formattedDate} - {weekDays[6].formattedDate}</b> va ajunge la <b>{projectedWeeklyHours}h</b> (normă efectivă: <b>{projectedEffectiveHours}h</b>, depășind limita standard de 40 de ore).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!isOvertimeProjected && projectedRecoveryDeducted > 0 && projectedWeeklyHours > 40 && (
+            <div className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 flex items-start gap-2 text-xs text-amber-900 animate-fadeIn">
+              <RotateCcw className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">Ore pentru recuperare ore lipsă</span>
+                <p className="mt-0.5 text-amber-800">
+                  Totalul de <b>{projectedWeeklyHours}h</b> include <b>{projectedRecoveryDeducted}h</b> alocate recuperării orelor lipsă. Norma efectivă este de <b>{projectedEffectiveHours}h</b>, prin urmare nu se consideră depășire penalizatoare.
                 </p>
               </div>
             </div>

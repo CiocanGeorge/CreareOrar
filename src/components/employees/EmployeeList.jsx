@@ -13,7 +13,7 @@ import {
   RotateCcw,
   UserX
 } from 'lucide-react';
-import { calculateEmployeeWeeklyHours, isOvertime } from '../../utils/timeCalculations';
+import { calculateEmployeeWeeklyHours, isOvertime, getEmployeeOvertimeStatus } from '../../utils/timeCalculations';
 
 export default function EmployeeList({ 
   employees = [], 
@@ -100,9 +100,10 @@ export default function EmployeeList({
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
                 {filteredEmployees.map((emp) => {
-                  const weeklyHours = calculateEmployeeWeeklyHours(emp.id, shifts);
+                  const empStatus = getEmployeeOvertimeStatus(emp.id, shifts, missingHours);
+                  const weeklyHours = empStatus.totalHours;
+                  const hasOvertime = empStatus.isOvertime;
                   const empShifts = shifts.filter((s) => s.employee_id === emp.id);
-                  const hasOvertime = isOvertime(weeklyHours);
 
                   // Ore lipsă de recuperat pentru acest angajat
                   const empMissing = missingHours.filter(
@@ -179,7 +180,13 @@ export default function EmployeeList({
                           {hasOvertime && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 mt-1">
                               <AlertTriangle className="w-3 h-3 text-rose-500" />
-                              Depășește 40h!
+                              Depășește 40h (+{empStatus.extraHours}h)!
+                            </span>
+                          )}
+                          {!hasOvertime && empStatus.recoveryDeducted > 0 && weeklyHours > 40 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 mt-1">
+                              <RotateCcw className="w-3 h-3 text-amber-600" />
+                              +{empStatus.recoveryDeducted}h de recuperat
                             </span>
                           )}
                         </div>
