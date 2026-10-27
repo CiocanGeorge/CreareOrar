@@ -14,7 +14,8 @@ import {
   Plus, 
   Check, 
   X,
-  Sliders
+  Sliders,
+  RotateCcw
 } from 'lucide-react';
 import { getDayOfWeekFromDate, getWeekDaysForDate, DAYS_NAMES_RO } from '../../utils/monthCalculations';
 import { SHIFT_COLORS, BASE_DEFAULT_TEMPLATES } from '../../utils/shiftTemplateHelpers';
